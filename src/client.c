@@ -6,22 +6,41 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <fcntl.h>
 #include "common.h"
+
+#define FILE_REQUEST_PREFIX "GET_FILE:"
 
 int main(int argc, char *argv[]) {
     int sock;
     struct addrinfo hints, *result;
-    char *message = "Hello, Server!";
     char buffer[BUFFER_SIZE] = {0};
     char *server_ip;
+    char filename[256] = {0};
     
     // Check if server IP was provided
     if (argc < 2) {
-        printf("Usage: %s <server_ip>\n", argv[0]);
+        printf("Usage: %s <server_ip> [filename]\n", argv[0]);
         printf("Using default IP: %s\n", SERVER_IP);
         server_ip = SERVER_IP;
     } else {
         server_ip = argv[1];
+    }
+    
+    // Check if filename was provided
+    if (argc < 3) {
+        printf("Enter filename to request: ");
+        if (fgets(filename, sizeof(filename), stdin) == NULL) {
+            fprintf(stderr, "Error reading filename\n");
+            return -1;
+        }
+        // Remove newline character if present
+        size_t len = strlen(filename);
+        if (len > 0 && filename[len-1] == '\n') {
+            filename[len-1] = '\0';
+        }
+    } else {
+        strncpy(filename, argv[2], sizeof(filename) - 1);
     }
 
     // Initialize address info struct
@@ -55,17 +74,61 @@ int main(int argc, char *argv[]) {
     printf("Connected to server at %s:%d\n", server_ip, PORT);
     freeaddrinfo(result);  // Free the address info structure
 
-    // Send message to server
-    write(sock, message, strlen(message));
-    printf("Message sent to server: %s\n", message);
-
+    // Create file request message
+    char request[BUFFER_SIZE];
+    snprintf(request, BUFFER_SIZE, "%s%s", FILE_REQUEST_PREFIX, filename);
+    
+    // Send file request to server
+    write(sock, request, strlen(request));
+    printf("File request sent: %s\n", request);
+    
+    // Create local file to save the downloaded content
+    char local_filename[256];
+    snprintf(local_filename, sizeof(local_filename), "downloaded_%s", filename);
+    int file_fd = open(local_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    
+    if (file_fd < 0) {
+        perror("Cannot create local file");
+        close(sock);
+        return -1;
+    }
+    
     // Receive response from server
-    int bytes_received = read(sock, buffer, BUFFER_SIZE - 1);
-    if (bytes_received > 0) {
-        buffer[bytes_received] = '\0';  // Ensure null termination
-        printf("Response from server: %s\n", buffer);
+    int first_chunk = 1;
+    int is_error = 0;
+    ssize_t bytes_received;
+    
+    while ((bytes_received = read(sock, buffer, BUFFER_SIZE - 1)) > 0) {
+        if (first_chunk) {
+            buffer[bytes_received] = '\0';  // Null-terminate to check prefix
+            
+            if (strncmp(buffer, "ERROR:", 6) == 0) {
+                // Error response from server
+                printf("Server error: %s\n", buffer);
+                is_error = 1;
+                break;
+            } else if (strncmp(buffer, "OK:", 3) == 0) {
+                // Success response, write to file starting after "OK:"
+                write(file_fd, buffer + 3, bytes_received - 3);
+            } else {
+                // No prefix, just write the data
+                write(file_fd, buffer, bytes_received);
+            }
+            
+            first_chunk = 0;
+        } else {
+            // Write subsequent chunks directly to the file
+            write(file_fd, buffer, bytes_received);
+        }
+    }
+    
+    close(file_fd);
+    
+    if (!is_error) {
+        printf("File downloaded successfully as '%s'\n", local_filename);
     } else {
-        printf("No response or error receiving from server\n");
+        // Remove the empty file if there was an error
+        unlink(local_filename);
     }
 
     // Close socket
