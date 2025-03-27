@@ -11,6 +11,7 @@
 
 #define FILE_REQUEST_PREFIX "GET_FILE:"
 #define MAX_FILENAME_SIZE 256
+#define FILE_SHARING_DIR "file-sharing"
 
 int main() {
     int server_fd, client_fd;
@@ -18,6 +19,16 @@ int main() {
     int opt = 1;
     int addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};
+
+    // Create the file-sharing directory if it doesn't exist
+    struct stat st = {0};
+    if (stat(FILE_SHARING_DIR, &st) == -1) {
+        if (mkdir(FILE_SHARING_DIR, 0755) == -1) {
+            perror("Failed to create file-sharing directory");
+            exit(EXIT_FAILURE);
+        }
+        printf("Created file-sharing directory\n");
+    }
 
     // Create socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
@@ -49,6 +60,7 @@ int main() {
     }
 
     printf("Server listening on port %d...\n", PORT);
+    printf("Serving files from '%s' directory\n", FILE_SHARING_DIR);
     
     while(1) {
         printf("Waiting for connection...\n");
@@ -76,16 +88,30 @@ int main() {
         
         // Check if it's a file request
         if (strncmp(buffer, FILE_REQUEST_PREFIX, strlen(FILE_REQUEST_PREFIX)) == 0) {
-            char filename[MAX_FILENAME_SIZE];
-            strcpy(filename, buffer + strlen(FILE_REQUEST_PREFIX));
+            char base_filename[MAX_FILENAME_SIZE];
+            strcpy(base_filename, buffer + strlen(FILE_REQUEST_PREFIX));
             
-            printf("File requested: %s\n", filename);
+            // Check for path traversal attempts (security check)
+            if (strstr(base_filename, "..") != NULL) {
+                char error_msg[BUFFER_SIZE];
+                snprintf(error_msg, BUFFER_SIZE, "ERROR: Invalid filename (path traversal attempt)");
+                write(client_fd, error_msg, strlen(error_msg));
+                printf("%s\n", error_msg);
+                close(client_fd);
+                continue;
+            }
+            
+            // Construct the full path within the file-sharing directory
+            char full_path[MAX_FILENAME_SIZE + sizeof(FILE_SHARING_DIR) + 2]; // +2 for '/' and null terminator
+            snprintf(full_path, sizeof(full_path), "%s/%s", FILE_SHARING_DIR, base_filename);
+            
+            printf("File requested: %s (Path: %s)\n", base_filename, full_path);
             
             // Open the requested file
-            int file_fd = open(filename, O_RDONLY);
+            int file_fd = open(full_path, O_RDONLY);
             if (file_fd < 0) {
                 char error_msg[BUFFER_SIZE];
-                snprintf(error_msg, BUFFER_SIZE, "ERROR: File '%s' not found or cannot be opened", filename);
+                snprintf(error_msg, BUFFER_SIZE, "ERROR: File '%s' not found or cannot be opened", base_filename);
                 write(client_fd, error_msg, strlen(error_msg));
                 printf("%s\n", error_msg);
             } else {
@@ -103,7 +129,7 @@ int main() {
                 }
                 
                 close(file_fd);
-                printf("File '%s' sent successfully\n", filename);
+                printf("File '%s' sent successfully\n", base_filename);
             }
         } else {
             // Handle as a normal message
