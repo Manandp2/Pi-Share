@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include "common.h"
 
 #define FILE_REQUEST_PREFIX "GET_FILE:"
@@ -17,6 +18,16 @@ int main(int argc, char *argv[]) {
     char buffer[BUFFER_SIZE] = {0};
     char *server_ip;
     char filename[256] = {0};
+    
+    // Create the downloads directory if it doesn't exist
+    struct stat st = {0};
+    if (stat(DOWNLOADS_DIR, &st) == -1) {
+        if (mkdir(DOWNLOADS_DIR, 0755) == -1) {
+            perror("Failed to create downloads directory");
+            exit(EXIT_FAILURE);
+        }
+        printf("Created downloads directory\n");
+    }
     
     // Check if server IP was provided
     if (argc < 2) {
@@ -83,9 +94,9 @@ int main(int argc, char *argv[]) {
     printf("File request sent: %s\n", request);
     
     // Create local file to save the downloaded content
-    char local_filename[256];
-    snprintf(local_filename, sizeof(local_filename), "downloaded_%s", filename);
-    int file_fd = open(local_filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    char local_path[512];
+    snprintf(local_path, sizeof(local_path), "%s/%s", DOWNLOADS_DIR, filename);
+    int file_fd = open(local_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     
     if (file_fd < 0) {
         perror("Cannot create local file");
@@ -125,10 +136,10 @@ int main(int argc, char *argv[]) {
     close(file_fd);
     
     if (!is_error) {
-        printf("File downloaded successfully as '%s'\n", local_filename);
+        printf("File downloaded successfully as '%s/%s'\n", DOWNLOADS_DIR, filename);
     } else {
         // Remove the empty file if there was an error
-        unlink(local_filename);
+        unlink(local_path);
     }
 
     // Close socket

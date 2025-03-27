@@ -11,7 +11,6 @@
 
 #define FILE_REQUEST_PREFIX "GET_FILE:"
 #define MAX_FILENAME_SIZE 256
-#define FILE_SHARING_DIR "file-sharing"
 
 int main() {
     int server_fd, client_fd;
