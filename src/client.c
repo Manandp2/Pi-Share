@@ -8,11 +8,21 @@
 #include <netdb.h>
 #include "common.h"
 
-int main() {
+int main(int argc, char *argv[]) {
     int sock;
     struct addrinfo hints, *result;
     char *message = "Hello, Server!";
     char buffer[BUFFER_SIZE] = {0};
+    char *server_ip;
+    
+    // Check if server IP was provided
+    if (argc < 2) {
+        printf("Usage: %s <server_ip>\n", argv[0]);
+        printf("Using default IP: %s\n", SERVER_IP);
+        server_ip = SERVER_IP;
+    } else {
+        server_ip = argv[1];
+    }
 
     // Initialize address info struct
     memset(&hints, 0, sizeof(struct addrinfo));
@@ -20,7 +30,7 @@ int main() {
     hints.ai_socktype = SOCK_STREAM;  // TCP
 
     // Get address info for the server
-    int s = getaddrinfo(SERVER_IP, "8000", &hints, &result);
+    int s = getaddrinfo(server_ip, "8000", &hints, &result);
     if (s != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
         return -1;
@@ -42,7 +52,7 @@ int main() {
         return -1;
     }
 
-    printf("Connected to server at %s:%d\n", SERVER_IP, PORT);
+    printf("Connected to server at %s:%d\n", server_ip, PORT);
     freeaddrinfo(result);  // Free the address info structure
 
     // Send message to server
