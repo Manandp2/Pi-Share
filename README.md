@@ -1,24 +1,4 @@
-# Simple C Network Project
-
-This project demonstrates a simple network connection between two devices using C. It consists of a client and a server that communicate over a TCP socket.
-
-## Project Structure
-
-```
-simple-c-network
-├── src
-│   ├── client.c
-│   ├── server.c
-│   └── common.h
-├── Makefile
-└── README.md
-```
-
-## Prerequisites
-
-- A C compiler (e.g., gcc)
-- Basic knowledge of C programming
-- Access to a terminal or command prompt
+# Pi-Share 341 Project
 
 ## Compilation
 
@@ -34,7 +14,7 @@ This will generate two executables: `client` and `server`.
 
 Before running the client, you need to start the server. In the terminal, execute:
 
-```
+```bash
 ./server
 ```
 
@@ -44,19 +24,18 @@ The server will start and listen for incoming connections on the specified port.
 
 Once the server is running, open another terminal window and execute:
 
-```
-./client <server_ip> <port>
+```bash
+./client <server_ip> <filename(optional)>
 ```
 
-Replace `<server_ip>` with the IP address of the machine running the server and `<port>` with the port number specified in the code.
+Replace `<server_ip>` with the IP address of the machine running the server and `<filename(optional)>` with the filename you want to request. Otherwise, you will be prompted for the filename when the program runs.
 
 ## Example
 
 1. Start the server on one device.
 2. Run the client on another device, providing the server's IP address and port.
-3. The client will send a message to the server, and the server will respond.
+3. The client will ask the server for a file, and the server will send it back.
+4. Currently, the client is set up to only accept one file and then close.
 
-## Notes
-
-- Ensure that the firewall settings allow traffic on the specified port.
-- This example uses TCP sockets for communication.
+## Details
+All files are downloaded to/shared from the `pi-sharing` directory.
