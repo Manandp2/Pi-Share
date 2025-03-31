@@ -39,3 +39,4 @@ Replace `<server_ip>` with the IP address of the machine running the server and 
 
 ## Details
 All files are downloaded to/shared from the `pi-sharing` directory.
+This directory is automatically created if it doesn't exist.
