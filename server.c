@@ -39,6 +39,28 @@ typedef struct {
     bool size_read;
 } client_info;
 
+typedef struct {
+    char ip[INET_ADDRSTRLEN];  // IPv4 address
+    char port[6];              // Port as string (max 65535 + null)
+} server_info;
+
+static dictionary* file_to_server;  // Maps file name -> server_info*
+static vector* mini_servers;        // List of all sub-servers for round-robin PUT
+static size_t current_server_index = 0;
+
+
+void* server_info_copy_constructor(void* p) {
+    server_info* copy = malloc(sizeof(server_info));
+    memcpy(copy, p, sizeof(server_info));
+    return copy;
+}
+
+
+file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
+    free, server_info_copy_constructor, free);
+mini_servers = vector_create(server_info_copy_constructor, free);
+
+
 #define MAX_EVENTS 1000
 static bool run_server = true;
 static vector* files;
@@ -403,46 +425,93 @@ void read_file_name(client_info* client) {
  * @param client client that has a GET request
  */
 void get(client_info* client) {
+
+
+    //check the dictionary for the file name, if it exists, then get the server info from the dictionary
+    //send that server info the client
+    //change the client state to stateDone
+
+    //KEEP THIS
     /* Check if the file exists */
+    // First: check if main server has it
     bool file_found = false;
     VECTOR_FOR_EACH(
         files, f,
         if (strcmp(f, client->header) == 0) {
-        file_found = true;
-        break;
+            file_found = true;
+            break;
         }
     );
-    if (!file_found) {
-        client->state = INVALID_FILE;
-        return;
-    }
-    send_ok_msg_to_client(client);
+    if (file_found) {
+        // Serve locally
+        send_ok_msg_to_client(client);
 
-    client->local_file = open(client->header, O_RDONLY);
-
-    struct stat s;
-    fstat(client->local_file, &s);
-    const size_t file_size = s.st_size;
-    if (write_n_to_client(client, &file_size, sizeof(file_size)) != sizeof(file_size)) {
-        client->state = INCORRECT_DATA_AMOUNT;
-        return;
-    }
-
-    /* The file exists, write it back to the client */
-    char buffer[1024];
-    ssize_t read_result = 0;
-    do {
-        read_result = read(client->local_file, buffer, 1024);
-        if (read_result != 0 && read_result != -1) {
-            write_n_to_client(client, buffer, read_result);
+        client->local_file = open(client->header, O_RDONLY);
+        struct stat s;
+        fstat(client->local_file, &s);
+        const size_t file_size = s.st_size;
+        if (write_n_to_client(client, &file_size, sizeof(file_size)) != sizeof(file_size)) {
+            client->state = INCORRECT_DATA_AMOUNT;
+            return;
         }
-    } while (read_result != 0 && read_result != -1);
+
+        char buffer[1024];
+        ssize_t read_result = 0;
+        do {
+            read_result = read(client->local_file, buffer, 1024);
+            if (read_result > 0) {
+                write_n_to_client(client, buffer, read_result);
+            }
+        } while (read_result > 0);
+
+        client->state = DONE;
+        return;
+    }
+
+    // Otherwise: check dictionary and redirect
+    server_info* info = dictionary_get(file_to_server, client->header);
+    send_ok_msg_to_client(client);
+    if (info == NULL) {
+        write_n_to_client(client, "0.0.0.0\n0\n", 10);
+    } else {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s\n%s\n", info->ip, info->port);
+        write_n_to_client(client, msg, strlen(msg));
+    }
 
     client->state = DONE;
+
 }
 
 void put(client_info* client) {
     /* Check if the file already exists */
+    
+ 
+    //if turn index is not 0, then redirect to the next server at that index
+    //send the ip and port of the server to the client 
+    //change the client state to stateDone 
+    //increment the index, make sure it wraps around
+    //exit the funciton
+    //if the index is 0, then we do this 
+    size_t n = vector_size(mini_servers);
+    if (client->local_file == 0 && current_server_index != 0 && n > 0) {
+        // Redirect to the correct mini server
+        server_info* target = vector_get(mini_servers, current_server_index - 1);
+        dictionary_set(file_to_server, client->header, target);
+
+        send_ok_msg_to_client(client);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s\n%s\n", target->ip, target->port);
+        size_t len = strlen(msg);
+        write_n_to_client(client, &len, sizeof(len));
+        write_n_to_client(client, msg, strlen(msg));
+
+        client->state = DONE;
+        current_server_index = (current_server_index + 1) % (n + 1);  // wrap around including self
+        return;
+    }
+
+    //keep this
     if (client->local_file == 0) {
         bool file_found = false;
         VECTOR_FOR_EACH(
@@ -459,6 +528,7 @@ void put(client_info* client) {
         memset(client->header, 0, client->buffer_position);
         client->buffer_position = 0;
     }
+    //keep the rest of this 
     if (client->size_read == false) {
         read_n_from_client(client, &client->file_size, sizeof(client->file_size));
         if ((size_t)client->buffer_position < sizeof(client->file_size)) {
