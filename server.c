@@ -241,14 +241,14 @@ int main(int argc, char** argv) {
         }
     }
     dictionary_destroy(client_dictionary);
-    VECTOR_FOR_EACH(
-        files, file,
-        unlink(file);
-    );
+    // VECTOR_FOR_EACH(
+    //     files, file,
+    //     unlink(file);
+    // );
     vector_destroy(files);
     chdir(orig_dir);
     free(orig_dir);
-    rmdir(temp_dir);
+    // rmdir(temp_dir);
 }
 
 /**
