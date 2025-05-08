@@ -140,9 +140,9 @@ int main(int argc, char** argv) {
 
     files = string_vector_create();
     char* orig_dir = get_current_dir_name();
-    char temp_dir[7] = "XXXXXX";
-    if (mkdtemp(temp_dir) == NULL) {
-        perror("mkdtemp() failed");
+    char temp_dir[9] = "Pi-Share";
+    if (mkdir(temp_dir, 0777) == -1 && errno != EEXIST) {
+        perror("mkdir() failed");
         exit(1);
     }
     print_temp_directory(temp_dir);
