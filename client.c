@@ -310,11 +310,9 @@ void get(const int sock, char** args) {
     }
     free(header_msg);
     shutdown(sock, SHUT_WR);
-    printf("Wrote %zu bytes for GET\nprocessing response\n", header_msg_len);
     if (parse_header(sock)) {
         // read the size
         const size_t file_size = get_size(sock);
-        printf("Expecting %zu bytes from server\n", file_size);
         const int local_fd = open(local_file, O_WRONLY | O_CREAT | O_TRUNC, 0777);
         char buffer[1024];
         size_t cur_read = 0;
@@ -417,10 +415,8 @@ void list(const int sock) {
         exit(1);
     }
     shutdown(sock, SHUT_WR);
-    printf("Wrote %zu bytes for LIST\nprocessing response\n", list_request_size);
     if (parse_header(sock)) { // The server responded properly, now we need to read the list
         const size_t size = get_size(sock);
-        printf("Expecting %zu bytes from server\n", size);
         char* list = malloc(size + 1);
         if (read_all_from_server(sock, list, size) != size) {
             print_too_little_data();
