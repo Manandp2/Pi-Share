@@ -2,6 +2,7 @@
  * nonstop_networking
  * CS 341 - Spring 2025
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -11,8 +12,9 @@
 #include <stdlib.h>
 #include <bits/socket.h>
 #include <sys/epoll.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "common.h"
 #include "format.h"
@@ -170,16 +172,16 @@ int main(int argc, char** argv) {
 
     files = string_vector_create();
     char* orig_dir = get_current_dir_name();
-    char temp_dir[9] = "Pi-Share";
-    if (mkdir(temp_dir, 0777) == -1 && errno != EEXIST) {
+    char pi_share_dir[9] = "Pi-Share";
+    if (mkdir(pi_share_dir, 0777) == -1 && errno != EEXIST) {
         perror("mkdir() failed");
         exit(1);
     }
-    print_temp_directory(temp_dir);
-    
+    print_temp_directory(pi_share_dir);
+
     // Pi share scraping code
     struct dirent* entry;
-    DIR* dir = opendir(directory_path);
+    DIR* dir = opendir(pi_share_dir);
     if (dir == NULL) {
         perror("opendir() failed");
         exit(1);
@@ -190,15 +192,15 @@ int main(int argc, char** argv) {
         }
         struct stat entry_stat;
         char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->d_name);
+        snprintf(full_path, sizeof(full_path), "%s/%s", pi_share_dir, entry->d_name);
         if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
-            vector_add(files, entry->d_name);
+            vector_push_back(files, entry->d_name);
         }
     }
     closedir(dir);
     // End of scraping code
 
-    chdir(temp_dir);
+    chdir(pi_share_dir);
     // ReSharper disable once CppDFALoopConditionNotUpdated
     while (run_server) {
         const int num_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -468,7 +470,7 @@ void get(client_info* client) {
     if (file_found) {
         // Serve locally
         send_ok_msg_to_client(client);
-
+        write_n_to_client(client, "0.0.0.0\n0\n", 10);
         client->local_file = open(client->header, O_RDONLY);
         struct stat s;
         fstat(client->local_file, &s);
@@ -501,13 +503,10 @@ void get(client_info* client) {
         return;
     }
     send_ok_msg_to_client(client);
-    if (info == NULL) {
-        write_n_to_client(client, "0.0.0.0\n0\n", 10);
-    } else {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "%s\n%s\n", info->ip, info->port);
-        write_n_to_client(client, msg, strlen(msg));
-    }
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s\n%s\n", info->ip, info->port);
+    write_n_to_client(client, msg, strlen(msg));
+
 
     client->state = DONE;
 }
