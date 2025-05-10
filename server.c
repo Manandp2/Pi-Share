@@ -515,9 +515,6 @@ void get(client_info* client) {
 }
 
 void put(client_info* client) {
-    /* Check if the file already exists */
-    printf("iaoidajsdijasodijoaijsd\n");
-
     //if turn index is not 0, then redirect to the next server at that index
     //send the ip and port of the server to the client 
     //change the client state to stateDone 
