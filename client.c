@@ -626,5 +626,7 @@ void add_server(int sock) {
     }
     shutdown(sock, SHUT_RD);
 
-    execlp("./server", "./server", "8080");
+    printf("Starting server...\n");
+    execlp("./server", "./server", "8080", NULL);
+    printf("It came back from narnia bruh\n");
 }
