@@ -57,6 +57,7 @@ void get(client_info* client);
 void put(client_info* client);
 void delete(client_info* client);
 void list(client_info* client);
+void add_server(client_info* client);
 void send_ok_msg_to_client(const client_info* client);
 void send_error_msg_to_client(const client_info* client);
 void send_invalid_req_msg_to_client(const client_info* client);
@@ -357,7 +358,13 @@ verb parse_verb(client_info* client) {
             client->state = INVALID_VERB;
             return V_UNKNOWN;
         }
-    } else {
+    } else if (pos < 11) { /* Can't tell if we have 'ADD_SERVER\n' yet */
+        ssize_t res = read_n_from_client(client, client->header, 11 - pos);
+        if (res == -1 || res == -2) {
+            client->state = INVALID_VERB;
+            return V_UNKNOWN;
+        }
+    }else {
         client->state = INVALID_VERB;
         return V_UNKNOWN;
     }
@@ -384,6 +391,10 @@ verb parse_verb(client_info* client) {
         client->buffer_position = 0;
         client->state = READING_HEADER;
         return DELETE;
+    }
+    if (pos == 11 && strncmp(client->header, "ADD_SERVER ", 11) == 0) {
+        client->state = HANDLING_VERB;
+        return ADD_SERVER;
     }
 
     return V_UNKNOWN;
@@ -557,6 +568,45 @@ void list(client_info* client) {
         return;
     }
     free(file_list);
+    client->state = DONE;
+}
+
+void add_server(client_info* client) {
+    char buffer[1024]; // Buffer to store incoming filenames
+    ssize_t bytes_read;
+
+    while (1) {
+        // Read a line from the client
+        bytes_read = read_n_from_client(client, buffer, sizeof(buffer) - 1);
+        if (bytes_read <= 0) {
+            // If no data is received or an error occurs, break the loop
+            if (bytes_read == 0) {
+                break; // Client closed the connection
+            } else {
+                perror("read_n_from_client");
+                send_error_msg_to_client(client);
+                client->state = INCORRECT_DATA_AMOUNT;
+                return;
+            }
+        }
+
+        buffer[bytes_read] = '\0'; // Null-terminate the string
+
+        // Check for end of input (e.g., a special termination string like "END\n")
+        if (strcmp(buffer, "END\n") == 0) {
+            break;
+        }
+        // Remove trailing newline character, if present
+        buffer[strcspn(buffer, "\n")] = '\0';
+        // Add the filename to the vector
+        if (!vector_push_back(files, strdup(buffer))) {
+            perror("vector_push_back");
+            send_error_msg_to_client(client);
+            client->state = SERVER_ERROR;
+            return;
+        }
+    }
+    send_ok_msg_to_client(client); // Notify the client that the operation was successful
     client->state = DONE;
 }
 

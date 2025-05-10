@@ -30,6 +30,7 @@ void get(int sock, char** args);
 void put(int sock, char** args);
 void delete(int sock, char** args);
 void list(int sock);
+void add_server(int sock);
 
 int main(const int argc, char** argv) {
     char** args = parse_args(argc, argv);
@@ -492,3 +493,71 @@ void list(const int sock) {
     }
     shutdown(sock, SHUT_RD);
 }
+
+void add_server(int sock) {
+    // Read the list of files from the server
+    char* header_msg;
+    // TODO get ip address here
+    asprintf(&header_msg, "ADD_SERVER %s\n", ip_address);
+    const size_t header_msg_len = strlen(header_msg);
+    if (write_all_to_server(sock, header_msg, header_msg_len) != header_msg_len) {
+        free(header_msg);
+        exit(1);
+    }
+
+    // scrape files
+    struct dirent* entry;
+    struct vector * files = string_vector_create();
+    DIR* dir = opendir(directory_path);
+    if (dir == NULL) {
+        perror("opendir() failed");
+        exit(1);
+    }
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        struct stat entry_stat;
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->d_name);
+        if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
+            vector_add(files, entry->d_name);
+        }
+    }
+    closedir(dir);
+
+    size_t buffer_size = 128;
+    char* file_list = malloc(buffer_size);
+    size_t total_bytes = 0;
+    VECTOR_FOR_EACH(
+        files, file,
+        const size_t len = strlen(file);
+        if (total_bytes + len + 1 >= buffer_size) {
+        buffer_size *= 2;
+        file_list = realloc(file_list, buffer_size);
+        }
+        memcpy(file_list + total_bytes, file, len);
+        total_bytes += len;
+        file_list[total_bytes++] = '\n';
+    );
+    --total_bytes;
+    // write bytes to read
+    if (write_all_to_server(client, &total_bytes, sizeof(total_bytes)) != sizeof(total_bytes)) {
+        client->state = INCORRECT_DATA_AMOUNT;
+        return;
+    }
+    // write file names
+    if (write_all_to_server(client, file_list, (ssize_t)total_bytes) != (ssize_t)total_bytes) {
+        client->state = INCORRECT_DATA_AMOUNT;
+        return;
+    }
+    free(file_list);
+    vector_destroy(files);
+    shutdown(sock, SHUT_WR);
+    free(header_msg);
+    if (parse_header(sock)) {
+        print_success();
+    }
+    shutdown(sock, SHUT_RD);
+}
+
