@@ -40,14 +40,9 @@ typedef struct {
 } client_info;
 
 typedef struct {
-    char ip[INET_ADDRSTRLEN];  // IPv4 address
-    char port[6];              // Port as string (max 65535 + null)
+    char ip[INET_ADDRSTRLEN]; // IPv4 address
+    char port[6]; // Port as string (max 65535 + null)
 } server_info;
-
-static dictionary* file_to_server;  // Maps file name -> server_info*
-static vector* mini_servers;        // List of all sub-servers for round-robin PUT
-static size_t current_server_index = 0;
-
 
 void* server_info_copy_constructor(void* p) {
     server_info* copy = malloc(sizeof(server_info));
@@ -55,10 +50,16 @@ void* server_info_copy_constructor(void* p) {
     return copy;
 }
 
+void* server_info_default_constructor() {
+    return calloc(1, sizeof(server_info));
+}
 
-file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
-    free, server_info_copy_constructor, free);
-mini_servers = vector_create(server_info_copy_constructor, free);
+static dictionary* file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
+                                                      free, server_info_copy_constructor,
+                                                      free); // Maps file name -> server_info*
+static vector* mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
+// List of all sub-servers for round-robin PUT
+static size_t current_server_index = 0;
 
 
 #define MAX_EVENTS 1000
@@ -231,7 +232,8 @@ int main(int argc, char** argv) {
                         perror("epoll_ctl() failed: removing client sock");
                         exit(1);
                     }
-                } else if (info->state == INVALID_VERB) { /* There could have been an error when handling something else */
+                } else if (info->state == INVALID_VERB) {
+                    /* There could have been an error when handling something else */
                     send_error_msg_to_client(info);
                     send_invalid_req_msg_to_client(info);
                     close_client_connection(info);
@@ -414,7 +416,7 @@ void read_file_name(client_info* client) {
         return;
     }
     if (res == -1 || client->buffer_position == 1024 || res == 0) {
-            client->state = INCORRECT_DATA_AMOUNT; // TOO_MUCH_DATA?
+        client->state = INCORRECT_DATA_AMOUNT; // TOO_MUCH_DATA?
     }
 }
 
@@ -425,8 +427,6 @@ void read_file_name(client_info* client) {
  * @param client client that has a GET request
  */
 void get(client_info* client) {
-
-
     //check the dictionary for the file name, if it exists, then get the server info from the dictionary
     //send that server info the client
     //change the client state to stateDone
@@ -438,8 +438,8 @@ void get(client_info* client) {
     VECTOR_FOR_EACH(
         files, f,
         if (strcmp(f, client->header) == 0) {
-            file_found = true;
-            break;
+        file_found = true;
+        break;
         }
     );
     if (file_found) {
@@ -480,13 +480,12 @@ void get(client_info* client) {
     }
 
     client->state = DONE;
-
 }
 
 void put(client_info* client) {
     /* Check if the file already exists */
-    
- 
+
+
     //if turn index is not 0, then redirect to the next server at that index
     //send the ip and port of the server to the client 
     //change the client state to stateDone 
@@ -507,10 +506,11 @@ void put(client_info* client) {
         write_n_to_client(client, msg, strlen(msg));
 
         client->state = DONE;
-        current_server_index = (current_server_index + 1) % (n + 1);  // wrap around including self
+        current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
         return;
     }
-
+    // need to increment the server index when its our turn as well
+    current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
     //keep this
     if (client->local_file == 0) {
         bool file_found = false;
@@ -585,6 +585,18 @@ void list(client_info* client) {
     size_t total_bytes = 0;
     VECTOR_FOR_EACH(
         files, file,
+        const size_t len = strlen(file);
+        if (total_bytes + len + 1 >= buffer_size) {
+        buffer_size *= 2;
+        file_list = realloc(file_list, buffer_size);
+        }
+        memcpy(file_list + total_bytes, file, len);
+        total_bytes += len;
+        file_list[total_bytes++] = '\n';
+    );
+    // Also send all the files on other servers
+    VECTOR_FOR_EACH(
+        dictionary_keys(file_to_server), file,
         const size_t len = strlen(file);
         if (total_bytes + len + 1 >= buffer_size) {
         buffer_size *= 2;
