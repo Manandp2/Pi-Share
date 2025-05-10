@@ -559,7 +559,7 @@ void add_server(int sock) {
     // TODO get ip address here
     char ipaddr[INET_ADDRSTRLEN];
     get_my_ip_addr(ipaddr);
-    asprintf(&header_msg, "ADD_SERVER %s\n", ipaddr);
+    asprintf(&header_msg, "ADD_SERVER %s 8080\n", ipaddr);
     const size_t header_msg_len = strlen(header_msg);
     if (write_all_to_server(sock, header_msg, header_msg_len) != header_msg_len) {
         free(header_msg);
