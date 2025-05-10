@@ -357,10 +357,9 @@ void get(int sock, char** args) {
         shutdown(sock, SHUT_WR);
 
         if (parse_header(sock)) {
-            // Now, we get <pre_size:size_t><ip addr:str>\n<port:str>\n
-            size_t pre_len = get_size(sock);
-            ssize_t ip_addr_len = read_line_from_server(sock, ip_addr, pre_len);
-            ssize_t port_len = read_line_from_server(sock, port, pre_len - ip_addr_len);
+            // Now, we get <ip addr:str>\n<port:str>\n
+            read_line_from_server(sock, ip_addr, 64);
+            read_line_from_server(sock, port, 64);
             if (strcmp(ip_addr, "0.0.0.0") != 0) {
                 // We need to reconnect to the new server and resend the request
                 shutdown(sock, SHUT_RD);
