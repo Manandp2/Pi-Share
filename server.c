@@ -94,6 +94,9 @@ int main(int argc, char** argv) {
                                        free, server_info_copy_constructor,
                                        free); // Maps file name -> server_info*
     mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
+
+    server_info test_server = {"172.22.146.40", "8080"};
+    vector_push_back(mini_servers, &test_server);
     if (argc < 2) {
         print_server_usage();
         exit(1);
@@ -216,7 +219,7 @@ int main(int argc, char** argv) {
                     perror("accept() failed");
                 }
                 set_nonblocking(client);
-                ev.events = EPOLLIN; // | EPOLLET;
+                ev.events = EPOLLIN | EPOLLOUT; // | EPOLLET;
                 ev.data.fd = client;
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client, &ev) == -1) {
                     perror("epoll_ctl() failed: client sock");
@@ -513,7 +516,7 @@ void get(client_info* client) {
 
 void put(client_info* client) {
     /* Check if the file already exists */
-
+    printf("iaoidajsdijasodijoaijsd\n");
 
     //if turn index is not 0, then redirect to the next server at that index
     //send the ip and port of the server to the client 
@@ -522,24 +525,26 @@ void put(client_info* client) {
     //exit the funciton
     //if the index is 0, then we do this 
     size_t n = vector_size(mini_servers);
-    if (client->local_file == 0 && current_server_index != 0 && n > 0) {
-        // Redirect to the correct mini server
-        server_info* target = vector_get(mini_servers, current_server_index - 1);
-        dictionary_set(file_to_server, client->header, target);
+    if (client->local_file == 0) {
+        if (current_server_index != 0 && n > 0) {
+            // Redirect to the correct mini server
+            server_info* target = vector_get(mini_servers, current_server_index - 1);
+            dictionary_set(file_to_server, client->header, target);
 
-        send_ok_msg_to_client(client);
-        char msg[64];
-        snprintf(msg, sizeof(msg), "%s\n%s\n", target->ip, target->port);
-        size_t len = strlen(msg);
-        write_n_to_client(client, &len, sizeof(len));
-        write_n_to_client(client, msg, strlen(msg));
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s\n%s\n", target->ip, target->port);
+            write_n_to_client(client, msg, strlen(msg));
 
-        client->state = DONE;
-        current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
-        return;
+            client->state = DONE;
+            current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
+            return;
+        } else {
+            // need to increment the server index when its our turn as well
+            write_n_to_client(client, "0.0.0.0\n0\n", 10);
+            current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
+        }
     }
-    // need to increment the server index when its our turn as well
-    current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
+
     if (client->local_file == 0) {
         bool file_found = false;
         VECTOR_FOR_EACH(
