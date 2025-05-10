@@ -90,6 +90,18 @@ void send_incorrect_data_msg_to_client(const client_info* client);
 void close_client_connection(const client_info* client);
 void* client_info_copy_constructor(void* p);
 
+ssize_t read_line_from_client(client_info* client, char* buffer, size_t size) {
+    size_t idx = 0;
+
+    while (idx < size - 1) {
+        if (read(client->sock, buffer + idx, 1) <= 0) return -1;
+        if (buffer[idx] == '\n') break;
+        ++idx;
+    }
+    buffer[idx] = '\0';
+    return (ssize_t)idx;
+}
+
 int main(int argc, char** argv) {
     file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
                                        free, server_info_copy_constructor,
@@ -254,6 +266,9 @@ int main(int argc, char** argv) {
                         break;
                     case V_UNKNOWN:
                         break;
+                    case ADD_SERVER:
+                        add_server(info);
+                        break;
                     }
                     break;
                 }
@@ -395,7 +410,7 @@ verb parse_verb(client_info* client) {
             client->state = INVALID_VERB;
             return V_UNKNOWN;
         }
-    }else {
+    } else {
         client->state = INVALID_VERB;
         return V_UNKNOWN;
     }
@@ -424,7 +439,7 @@ verb parse_verb(client_info* client) {
         return DELETE;
     }
     if (pos == 11 && strncmp(client->header, "ADD_SERVER ", 11) == 0) {
-        client->state = HANDLING_VERB;
+        client->state = READING_HEADER;
         return ADD_SERVER;
     }
 
@@ -527,11 +542,11 @@ void get(client_info* client) {
 
 void put(client_info* client) {
     //if turn index is not 0, then redirect to the next server at that index
-    //send the ip and port of the server to the client 
-    //change the client state to stateDone 
+    //send the ip and port of the server to the client
+    //change the client state to stateDone
     //increment the index, make sure it wraps around
     //exit the funciton
-    //if the index is 0, then we do this 
+    //if the index is 0, then we do this
     size_t n = vector_size(mini_servers);
     if (client->local_file == 0) {
         if (current_server_index != 0 && n > 0) {
@@ -661,40 +676,32 @@ void list(client_info* client) {
 }
 
 void add_server(client_info* client) {
-    char buffer[1024]; // Buffer to store incoming filenames
-    ssize_t bytes_read;
+    // client->header is <ip> <port>
+    char* p = strchr(client->header, ' ');
+    *p = '\0';
+    server_info s;
+    strcpy(s.ip, client->header);
+    strcpy(s.port, p + 1);
 
-    while (1) {
-        // Read a line from the client
-        bytes_read = read_n_from_client(client, buffer, sizeof(buffer) - 1);
-        if (bytes_read <= 0) {
-            // If no data is received or an error occurs, break the loop
-            if (bytes_read == 0) {
-                break; // Client closed the connection
-            } else {
-                perror("read_n_from_client");
-                send_error_msg_to_client(client);
-                client->state = INCORRECT_DATA_AMOUNT;
-                return;
-            }
-        }
 
-        buffer[bytes_read] = '\0'; // Null-terminate the string
+    size_t bytes_read = 0;
+    size_t size;
 
-        // Check for end of input (e.g., a special termination string like "END\n")
-        if (strcmp(buffer, "END\n") == 0) {
+    while (bytes_read < sizeof(size_t)) {
+        const ssize_t cur_read = read(client->sock, &size + bytes_read, sizeof(size_t) - bytes_read);
+        if (cur_read == -1 || cur_read == 0) {
             break;
         }
-        // Remove trailing newline character, if present
-        buffer[strcspn(buffer, "\n")] = '\0';
-        // Add the filename to the vector
-        if (!vector_push_back(files, strdup(buffer))) {
-            perror("vector_push_back");
-            send_error_msg_to_client(client);
-            client->state = SERVER_ERROR;
-            return;
-        }
+        bytes_read += cur_read;
     }
+
+    char buffer[1024] = {0};
+    bytes_read = 0;
+    while (bytes_read < size) {
+        bytes_read += read_line_from_client(client, buffer, 1024);
+        dictionary_set(file_to_server, buffer, &s);
+    }
+
     send_ok_msg_to_client(client); // Notify the client that the operation was successful
     client->state = DONE;
 }
