@@ -2,6 +2,7 @@
  * nonstop_networking
  * CS 341 - Spring 2025
  */
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -11,8 +12,9 @@
 #include <stdlib.h>
 #include <bits/socket.h>
 #include <sys/epoll.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "common.h"
 #include "format.h"
@@ -39,13 +41,35 @@ typedef struct {
     bool size_read;
 } client_info;
 
+typedef struct {
+    char ip[INET_ADDRSTRLEN]; // IPv4 address
+    char port[6]; // Port as string (max 65535 + null)
+} server_info;
+
+void* server_info_copy_constructor(void* p) {
+    server_info* copy = malloc(sizeof(server_info));
+    memcpy(copy, p, sizeof(server_info));
+    return copy;
+}
+
+void* server_info_default_constructor() {
+    return calloc(1, sizeof(server_info));
+}
+
+static dictionary* file_to_server;
+static vector* mini_servers;
+// List of all sub-servers for round-robin PUT
+static size_t current_server_index = 0;
+
+
 #define MAX_EVENTS 1000
 static bool run_server = true;
 static vector* files;
 
 static void handler(int signum) {
-    (void)signum;
-    run_server = false;
+    if (signum == SIGINT) {
+        run_server = false;
+    }
 }
 
 void set_nonblocking(int fd);
@@ -66,6 +90,13 @@ void close_client_connection(const client_info* client);
 void* client_info_copy_constructor(void* p);
 
 int main(int argc, char** argv) {
+    file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
+                                       free, server_info_copy_constructor,
+                                       free); // Maps file name -> server_info*
+    mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
+
+    server_info test_server = {"172.22.146.40", "8080"};
+    vector_push_back(mini_servers, &test_server);
     if (argc < 2) {
         print_server_usage();
         exit(1);
@@ -77,6 +108,10 @@ int main(int argc, char** argv) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction() failed");
+        exit(1);
+    }
+    if (sigaction(SIGPIPE, &sa, NULL) == -1) {
         perror("sigaction() failed");
         exit(1);
     }
@@ -140,16 +175,16 @@ int main(int argc, char** argv) {
 
     files = string_vector_create();
     char* orig_dir = get_current_dir_name();
-    char temp_dir[9] = "Pi-Share";
-    if (mkdir(temp_dir, 0777) == -1 && errno != EEXIST) {
+    char pi_share_dir[9] = "Pi-Share";
+    if (mkdir(pi_share_dir, 0777) == -1 && errno != EEXIST) {
         perror("mkdir() failed");
         exit(1);
     }
-    print_temp_directory(temp_dir);
-    
+    print_temp_directory(pi_share_dir);
+
     // Pi share scraping code
     struct dirent* entry;
-    DIR* dir = opendir(directory_path);
+    DIR* dir = opendir(pi_share_dir);
     if (dir == NULL) {
         perror("opendir() failed");
         exit(1);
@@ -160,15 +195,15 @@ int main(int argc, char** argv) {
         }
         struct stat entry_stat;
         char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->d_name);
+        snprintf(full_path, sizeof(full_path), "%s/%s", pi_share_dir, entry->d_name);
         if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
-            vector_add(files, entry->d_name);
+            vector_push_back(files, entry->d_name);
         }
     }
     closedir(dir);
     // End of scraping code
 
-    chdir(temp_dir);
+    chdir(pi_share_dir);
     // ReSharper disable once CppDFALoopConditionNotUpdated
     while (run_server) {
         const int num_fds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -184,7 +219,7 @@ int main(int argc, char** argv) {
                     perror("accept() failed");
                 }
                 set_nonblocking(client);
-                ev.events = EPOLLIN; // | EPOLLET;
+                ev.events = EPOLLIN | EPOLLOUT; // | EPOLLET;
                 ev.data.fd = client;
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client, &ev) == -1) {
                     perror("epoll_ctl() failed: client sock");
@@ -231,7 +266,8 @@ int main(int argc, char** argv) {
                         perror("epoll_ctl() failed: removing client sock");
                         exit(1);
                     }
-                } else if (info->state == INVALID_VERB) { /* There could have been an error when handling something else */
+                } else if (info->state == INVALID_VERB) {
+                    /* There could have been an error when handling something else */
                     send_error_msg_to_client(info);
                     send_invalid_req_msg_to_client(info);
                     close_client_connection(info);
@@ -263,14 +299,9 @@ int main(int argc, char** argv) {
         }
     }
     dictionary_destroy(client_dictionary);
-    // VECTOR_FOR_EACH(
-    //     files, file,
-    //     unlink(file);
-    // );
     vector_destroy(files);
     chdir(orig_dir);
     free(orig_dir);
-    // rmdir(temp_dir);
 }
 
 /**
@@ -414,7 +445,7 @@ void read_file_name(client_info* client) {
         return;
     }
     if (res == -1 || client->buffer_position == 1024 || res == 0) {
-            client->state = INCORRECT_DATA_AMOUNT; // TOO_MUCH_DATA?
+        client->state = INCORRECT_DATA_AMOUNT; // TOO_MUCH_DATA?
     }
 }
 
@@ -425,7 +456,12 @@ void read_file_name(client_info* client) {
  * @param client client that has a GET request
  */
 void get(client_info* client) {
+    //check the dictionary for the file name, if it exists, then get the server info from the dictionary
+    //send that server info the client
+    //change the client state to stateDone
+
     /* Check if the file exists */
+    // First: check if main server has it
     bool file_found = false;
     VECTOR_FOR_EACH(
         files, f,
@@ -434,37 +470,78 @@ void get(client_info* client) {
         break;
         }
     );
-    if (!file_found) {
-        client->state = INVALID_FILE;
+    if (file_found) {
+        // Serve locally
+        send_ok_msg_to_client(client);
+        write_n_to_client(client, "0.0.0.0\n0\n", 10);
+        client->local_file = open(client->header, O_RDONLY);
+        struct stat s;
+        fstat(client->local_file, &s);
+        const size_t file_size = s.st_size;
+        if (write_n_to_client(client, &file_size, sizeof(file_size)) != sizeof(file_size)) {
+            client->state = INCORRECT_DATA_AMOUNT;
+            return;
+        }
+
+        char buffer[1024];
+        ssize_t read_result = 0;
+        do {
+            read_result = read(client->local_file, buffer, 1024);
+            if (read_result > 0) {
+                write_n_to_client(client, buffer, read_result);
+            }
+        } while (read_result > 0);
+
+        client->state = DONE;
+        return;
+    }
+
+    // Otherwise: check dictionary and redirect
+    server_info* info;
+    if (dictionary_contains(file_to_server, client->header)) {
+        info = dictionary_get(file_to_server, client->header);
+    } else {
+        send_invalid_file_to_client(client);
+        client->state = DONE;
         return;
     }
     send_ok_msg_to_client(client);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s\n%s\n", info->ip, info->port);
+    write_n_to_client(client, msg, strlen(msg));
 
-    client->local_file = open(client->header, O_RDONLY);
-
-    struct stat s;
-    fstat(client->local_file, &s);
-    const size_t file_size = s.st_size;
-    if (write_n_to_client(client, &file_size, sizeof(file_size)) != sizeof(file_size)) {
-        client->state = INCORRECT_DATA_AMOUNT;
-        return;
-    }
-
-    /* The file exists, write it back to the client */
-    char buffer[1024];
-    ssize_t read_result = 0;
-    do {
-        read_result = read(client->local_file, buffer, 1024);
-        if (read_result != 0 && read_result != -1) {
-            write_n_to_client(client, buffer, read_result);
-        }
-    } while (read_result != 0 && read_result != -1);
 
     client->state = DONE;
 }
 
 void put(client_info* client) {
-    /* Check if the file already exists */
+    //if turn index is not 0, then redirect to the next server at that index
+    //send the ip and port of the server to the client 
+    //change the client state to stateDone 
+    //increment the index, make sure it wraps around
+    //exit the funciton
+    //if the index is 0, then we do this 
+    size_t n = vector_size(mini_servers);
+    if (client->local_file == 0) {
+        if (current_server_index != 0 && n > 0) {
+            // Redirect to the correct mini server
+            server_info* target = vector_get(mini_servers, current_server_index - 1);
+            dictionary_set(file_to_server, client->header, target);
+
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s\n%s\n", target->ip, target->port);
+            write_n_to_client(client, msg, strlen(msg));
+
+            client->state = DONE;
+            current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
+            return;
+        } else {
+            // need to increment the server index when its our turn as well
+            write_n_to_client(client, "0.0.0.0\n0\n", 10);
+            current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
+        }
+    }
+
     if (client->local_file == 0) {
         bool file_found = false;
         VECTOR_FOR_EACH(
@@ -537,6 +614,18 @@ void list(client_info* client) {
     size_t total_bytes = 0;
     VECTOR_FOR_EACH(
         files, file,
+        const size_t len = strlen(file);
+        if (total_bytes + len + 1 >= buffer_size) {
+        buffer_size *= 2;
+        file_list = realloc(file_list, buffer_size);
+        }
+        memcpy(file_list + total_bytes, file, len);
+        total_bytes += len;
+        file_list[total_bytes++] = '\n';
+    );
+    // Also send all the files on other servers
+    VECTOR_FOR_EACH(
+        dictionary_keys(file_to_server), file,
         const size_t len = strlen(file);
         if (total_bytes + len + 1 >= buffer_size) {
         buffer_size *= 2;

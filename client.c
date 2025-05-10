@@ -357,10 +357,9 @@ void get(int sock, char** args) {
         shutdown(sock, SHUT_WR);
 
         if (parse_header(sock)) {
-            // Now, we get <pre_size:size_t><ip addr:str>\n<port:str>\n
-            size_t pre_len = get_size(sock);
-            ssize_t ip_addr_len = read_line_from_server(sock, ip_addr, pre_len);
-            ssize_t port_len = read_line_from_server(sock, port, pre_len - ip_addr_len);
+            // Now, we get <ip addr:str>\n<port:str>\n
+            read_line_from_server(sock, ip_addr, 64);
+            read_line_from_server(sock, port, 64);
             if (strcmp(ip_addr, "0.0.0.0") != 0) {
                 // We need to reconnect to the new server and resend the request
                 shutdown(sock, SHUT_RD);
@@ -399,7 +398,7 @@ void get(int sock, char** args) {
  * @param sock file descriptor of the server
  * @param args list of arguments from parse_args
  */
-void put(const int sock, char** args) {
+void put(int sock, char** args) {
     const char* local_file = args[4];
     const char* remote_file = args[3];
     const int fd = open(local_file, O_RDONLY);
@@ -411,35 +410,52 @@ void put(const int sock, char** args) {
     char* header_msg;
     asprintf(&header_msg, "PUT %s\n", remote_file);
     const size_t header_msg_len = strlen(header_msg);
-    if (write_all_to_server(sock, header_msg, header_msg_len) != header_msg_len) {
-        free(header_msg);
-        exit(1);
-    }
-    free(header_msg);
 
-    // Next, write file size
-    struct stat file_stat;
-    fstat(fd, &file_stat);
-    const size_t file_size = file_stat.st_size;
-    if (write_all_to_server(sock, &file_size, sizeof(file_size)) != sizeof(file_size)) {
-        exit(1);
-    }
-
-    // Now, we need to write the actual file to the server
-    char* buffer[1024];
-    ssize_t read_result = 0;
+    char ip_addr[32] = {0};
+    char port[32] = {0};
     do {
-        read_result = read(fd, buffer, 1024);
-        if (read_result != 0 && read_result != -1) {
-            write_all_to_server(sock, buffer, read_result);
+        if (write_all_to_server(sock, header_msg, header_msg_len) != header_msg_len) {
+            free(header_msg);
+            exit(1);
         }
-    } while (read_result != 0 && read_result != -1);
+        // Now, we get <ip addr:str>\n<port:str>\n
+        read_line_from_server(sock, ip_addr, 64);
+        printf("%s\n",ip_addr);
+        read_line_from_server(sock, port, 64);
+        printf("%s\n", port);
+        if (strcmp(ip_addr, "0.0.0.0") != 0) {
+            // We need to reconnect to the new server and resend the request
+            shutdown(sock, SHUT_RD);
+            close(sock);
+            sock = connect_to_server(sock, ip_addr, port);
+            continue;
+        }
+        // Next, write file size
+        struct stat file_stat;
+        fstat(fd, &file_stat);
+        const size_t file_size = file_stat.st_size;
+        if (write_all_to_server(sock, &file_size, sizeof(file_size)) != sizeof(file_size)) {
+            exit(1);
+        }
 
-    shutdown(sock, SHUT_WR);
-    if (parse_header(sock)) {
-        print_success();
-    }
-    shutdown(sock, SHUT_RD);
+        // Now, we need to write the actual file to the server
+        char* buffer[1024];
+        ssize_t read_result = 0;
+        do {
+            read_result = read(fd, buffer, 1024);
+            if (read_result != 0 && read_result != -1) {
+                write_all_to_server(sock, buffer, read_result);
+            }
+        } while (read_result != 0 && read_result != -1);
+
+        shutdown(sock, SHUT_WR);
+        if (parse_header(sock)) {
+            print_success();
+        }
+        shutdown(sock, SHUT_RD);
+    } while (strcmp(ip_addr, "0.0.0.0") != 0);
+
+    free(header_msg);
 }
 
 /**
