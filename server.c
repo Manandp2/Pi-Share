@@ -146,6 +146,28 @@ int main(int argc, char** argv) {
         exit(1);
     }
     print_temp_directory(temp_dir);
+    
+    // Pi share scraping code
+    struct dirent* entry;
+    DIR* dir = opendir(directory_path);
+    if (dir == NULL) {
+        perror("opendir() failed");
+        exit(1);
+    }
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        struct stat entry_stat;
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->d_name);
+        if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
+            vector_add(files, entry->d_name);
+        }
+    }
+    closedir(dir);
+    // End of scraping code
+
     chdir(temp_dir);
     // ReSharper disable once CppDFALoopConditionNotUpdated
     while (run_server) {
