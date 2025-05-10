@@ -65,8 +65,9 @@ static bool run_server = true;
 static vector* files;
 
 static void handler(int signum) {
-    (void)signum;
-    run_server = false;
+    if (signum == SIGINT) {
+        run_server = false;
+    }
 }
 
 void set_nonblocking(int fd);
@@ -102,6 +103,10 @@ int main(int argc, char** argv) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction() failed");
+        exit(1);
+    }
+    if (sigaction(SIGPIPE, &sa, NULL) == -1) {
         perror("sigaction() failed");
         exit(1);
     }
