@@ -265,14 +265,9 @@ int main(int argc, char** argv) {
         }
     }
     dictionary_destroy(client_dictionary);
-    // VECTOR_FOR_EACH(
-    //     files, file,
-    //     unlink(file);
-    // );
     vector_destroy(files);
     chdir(orig_dir);
     free(orig_dir);
-    // rmdir(temp_dir);
 }
 
 /**
@@ -431,7 +426,6 @@ void get(client_info* client) {
     //send that server info the client
     //change the client state to stateDone
 
-    //KEEP THIS
     /* Check if the file exists */
     // First: check if main server has it
     bool file_found = false;
@@ -511,7 +505,6 @@ void put(client_info* client) {
     }
     // need to increment the server index when its our turn as well
     current_server_index = (current_server_index + 1) % (n + 1); // wrap around including self
-    //keep this
     if (client->local_file == 0) {
         bool file_found = false;
         VECTOR_FOR_EACH(
@@ -528,7 +521,6 @@ void put(client_info* client) {
         memset(client->header, 0, client->buffer_position);
         client->buffer_position = 0;
     }
-    //keep the rest of this 
     if (client->size_read == false) {
         read_n_from_client(client, &client->file_size, sizeof(client->file_size));
         if ((size_t)client->buffer_position < sizeof(client->file_size)) {
