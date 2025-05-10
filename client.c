@@ -625,4 +625,6 @@ void add_server(int sock) {
         print_success();
     }
     shutdown(sock, SHUT_RD);
+
+    execlp("./server", "./server", "8080");
 }
