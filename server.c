@@ -48,7 +48,8 @@ typedef struct {
 
 void* server_info_copy_constructor(void* p) {
     server_info* copy = malloc(sizeof(server_info));
-    memcpy(copy, p, sizeof(server_info));
+    strcpy(copy->ip, ((server_info*)p)->ip);
+    strcpy(copy->port, ((server_info*)p)->port);
     return copy;
 }
 
@@ -108,8 +109,6 @@ int main(int argc, char** argv) {
                                        free); // Maps file name -> server_info*
     mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
 
-    server_info test_server = {"172.22.146.40", "8080"};
-    vector_push_back(mini_servers, &test_server);
     if (argc < 2) {
         print_server_usage();
         exit(1);
@@ -439,6 +438,8 @@ verb parse_verb(client_info* client) {
         return DELETE;
     }
     if (pos == 11 && strncmp(client->header, "ADD_SERVER ", 11) == 0) {
+        memset(client->header, 0, client->buffer_position);
+        client->buffer_position = 0;
         client->state = READING_HEADER;
         return ADD_SERVER;
     }
@@ -687,13 +688,14 @@ void add_server(client_info* client) {
     size_t bytes_read = 0;
     size_t size;
 
-    while (bytes_read < sizeof(size_t)) {
-        const ssize_t cur_read = read(client->sock, &size + bytes_read, sizeof(size_t) - bytes_read);
-        if (cur_read == -1 || cur_read == 0) {
-            break;
-        }
-        bytes_read += cur_read;
-    }
+    read(client->sock, &size, sizeof(size));
+    // while (bytes_read < sizeof(size_t)) {
+    //     const ssize_t cur_read = read(client->sock, &size + bytes_read, sizeof(size_t) - bytes_read);
+    //     if (cur_read == -1 || cur_read == 0) {
+    //         break;
+    //     }
+    //     bytes_read += cur_read;
+    // }
 
     char buffer[1024] = {0};
     bytes_read = 0;
@@ -701,7 +703,7 @@ void add_server(client_info* client) {
         bytes_read += read_line_from_client(client, buffer, 1024);
         dictionary_set(file_to_server, buffer, &s);
     }
-
+    vector_push_back(mini_servers, &s);
     send_ok_msg_to_client(client); // Notify the client that the operation was successful
     client->state = DONE;
 }
