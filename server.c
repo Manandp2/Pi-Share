@@ -54,10 +54,8 @@ void* server_info_default_constructor() {
     return calloc(1, sizeof(server_info));
 }
 
-static dictionary* file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
-                                                      free, server_info_copy_constructor,
-                                                      free); // Maps file name -> server_info*
-static vector* mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
+static dictionary* file_to_server;
+static vector* mini_servers;
 // List of all sub-servers for round-robin PUT
 static size_t current_server_index = 0;
 
@@ -89,6 +87,10 @@ void close_client_connection(const client_info* client);
 void* client_info_copy_constructor(void* p);
 
 int main(int argc, char** argv) {
+    file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
+                                       free, server_info_copy_constructor,
+                                       free); // Maps file name -> server_info*
+    mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
     if (argc < 2) {
         print_server_usage();
         exit(1);
@@ -463,7 +465,14 @@ void get(client_info* client) {
     }
 
     // Otherwise: check dictionary and redirect
-    server_info* info = dictionary_get(file_to_server, client->header);
+    server_info* info;
+    if (dictionary_contains(file_to_server, client->header)) {
+        info = dictionary_get(file_to_server, client->header);
+    } else {
+        send_invalid_file_to_client(client);
+        client->state = DONE;
+        return;
+    }
     send_ok_msg_to_client(client);
     if (info == NULL) {
         write_n_to_client(client, "0.0.0.0\n0\n", 10);
