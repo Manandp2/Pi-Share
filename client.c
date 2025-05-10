@@ -3,6 +3,8 @@
  * CS 341 - Spring 2025
  */
 #include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -10,9 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
+#include "includes/vector.h"
 
 #include "common.h"
 #include "format.h"
@@ -30,6 +35,7 @@ void get(int sock, char** args);
 void put(int sock, char** args);
 void delete(int sock, char** args);
 void list(int sock);
+void get_my_ip_addr(char* ipaddr);
 void add_server(int sock);
 
 int main(const int argc, char** argv) {
@@ -166,6 +172,9 @@ verb check_args(char** args) {
         return PUT;
     }
 
+    if (strcmp(command, "ADD_SERVER") == 0) {
+        return ADD_SERVER;
+    }
     // Not a valid Method
     print_client_help();
     exit(1);
@@ -494,11 +503,47 @@ void list(const int sock) {
     shutdown(sock, SHUT_RD);
 }
 
+void get_my_ip_addr(char* ipaddr) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return;
+    }
+
+    struct sockaddr_in remote;
+    memset(&remote, 0, sizeof(remote));
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(80); // arbitrary port
+    inet_pton(AF_INET, "8.8.8.8", &remote.sin_addr); // Google's DNS
+
+    if (connect(sock, (struct sockaddr*)&remote, sizeof(remote)) < 0) {
+        perror("connect");
+        close(sock);
+        return;
+    }
+    struct sockaddr_in local;
+    socklen_t len = sizeof(local);
+    if (getsockname(sock, (struct sockaddr*)&local, &len) == -1) {
+        perror("getsockname");
+        close(sock);
+        return;
+    }
+
+    char ipstr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &local.sin_addr, ipstr, sizeof(ipstr));
+    printf("Primary IP address: %s\n", ipstr);
+    strcpy(ipaddr, ipstr);
+    close(sock);
+}
+
+
 void add_server(int sock) {
     // Read the list of files from the server
     char* header_msg;
     // TODO get ip address here
-    asprintf(&header_msg, "ADD_SERVER %s\n", ip_address);
+    char ipaddr[INET_ADDRSTRLEN];
+    get_my_ip_addr(ipaddr);
+    asprintf(&header_msg, "ADD_SERVER %s\n", ipaddr);
     const size_t header_msg_len = strlen(header_msg);
     if (write_all_to_server(sock, header_msg, header_msg_len) != header_msg_len) {
         free(header_msg);
@@ -507,24 +552,27 @@ void add_server(int sock) {
 
     // scrape files
     struct dirent* entry;
-    struct vector * files = string_vector_create();
-    DIR* dir = opendir(directory_path);
+    vector* files = string_vector_create();
+    DIR* dir = opendir("Pi-Share");
     if (dir == NULL) {
-        perror("opendir() failed");
-        exit(1);
-    }
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
+        if (errno != ENOENT) {
+            perror("opendir() failed");
+            exit(1);
         }
-        struct stat entry_stat;
-        char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", directory_path, entry->d_name);
-        if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
-            vector_add(files, entry->d_name);
+    } else {
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            struct stat entry_stat;
+            char full_path[1024];
+            snprintf(full_path, sizeof(full_path), "%s/%s", "Pi-Share", entry->d_name);
+            if (stat(full_path, &entry_stat) == 0 && S_ISREG(entry_stat.st_mode)) {
+                vector_push_back(files, entry->d_name);
+            }
         }
+        closedir(dir);
     }
-    closedir(dir);
 
     size_t buffer_size = 128;
     char* file_list = malloc(buffer_size);
@@ -540,15 +588,15 @@ void add_server(int sock) {
         total_bytes += len;
         file_list[total_bytes++] = '\n';
     );
-    --total_bytes;
+    if (total_bytes > 0) {
+        --total_bytes;
+    }
     // write bytes to read
-    if (write_all_to_server(client, &total_bytes, sizeof(total_bytes)) != sizeof(total_bytes)) {
-        client->state = INCORRECT_DATA_AMOUNT;
+    if (write_all_to_server(sock, &total_bytes, sizeof(total_bytes)) != sizeof(total_bytes)) {
         return;
     }
     // write file names
-    if (write_all_to_server(client, file_list, (ssize_t)total_bytes) != (ssize_t)total_bytes) {
-        client->state = INCORRECT_DATA_AMOUNT;
+    if (write_all_to_server(sock, file_list, (ssize_t)total_bytes) != (ssize_t)total_bytes) {
         return;
     }
     free(file_list);
@@ -560,4 +608,3 @@ void add_server(int sock) {
     }
     shutdown(sock, SHUT_RD);
 }
-
