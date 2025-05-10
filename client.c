@@ -83,6 +83,8 @@ int main(const int argc, char** argv) {
     case LIST:
         list(sock);
         break;
+    case ADD_SERVER:
+        add_server(sock);
     case V_UNKNOWN:
         break;
     }
@@ -612,7 +614,7 @@ void add_server(int sock) {
         return;
     }
     // write file names
-    if (write_all_to_server(sock, file_list, (ssize_t)total_bytes) != (ssize_t)total_bytes) {
+    if (write_all_to_server(sock, file_list, (ssize_t)total_bytes) != total_bytes) {
         return;
     }
     free(file_list);
