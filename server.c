@@ -651,18 +651,22 @@ void list(client_info* client) {
         file_list[total_bytes++] = '\n';
     );
     // Also send all the files on other servers
-    VECTOR_FOR_EACH(
-        dictionary_keys(file_to_server), file,
-        const size_t len = strlen(file);
-        if (total_bytes + len + 1 >= buffer_size) {
-        buffer_size *= 2;
-        file_list = realloc(file_list, buffer_size);
+    if (dictionary_size(file_to_server) > 0) {
+        vector* v = dictionary_keys(file_to_server);
+        for (size_t i = 0; i < vector_size(v); ++i) {
+            char* file = vector_get(v, i);
+            const size_t len = strlen(file);
+            if (total_bytes + len + 1 >= buffer_size) {
+                buffer_size *= 2;
+                file_list = realloc(file_list, buffer_size);
+            }
+            memcpy(file_list + total_bytes, file, len);
+            total_bytes += len;
+            file_list[total_bytes++] = '\n';
         }
-        memcpy(file_list + total_bytes, file, len);
-        total_bytes += len;
-        file_list[total_bytes++] = '\n';
-    );
-    --total_bytes;
+        --total_bytes;
+    }
+
     send_ok_msg_to_client(client);
     if (write_n_to_client(client, &total_bytes, sizeof(total_bytes)) != sizeof(total_bytes)) {
         client->state = INCORRECT_DATA_AMOUNT;
