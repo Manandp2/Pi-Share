@@ -48,7 +48,8 @@ typedef struct {
 
 void* server_info_copy_constructor(void* p) {
     server_info* copy = malloc(sizeof(server_info));
-    memcpy(copy, p, sizeof(server_info));
+    strcpy(copy->ip, ((server_info*)p)->ip);
+    strcpy(copy->port, ((server_info*)p)->port);
     return copy;
 }
 
@@ -81,6 +82,7 @@ void get(client_info* client);
 void put(client_info* client);
 void delete(client_info* client);
 void list(client_info* client);
+void add_server(client_info* client);
 void send_ok_msg_to_client(const client_info* client);
 void send_error_msg_to_client(const client_info* client);
 void send_invalid_req_msg_to_client(const client_info* client);
@@ -89,14 +91,24 @@ void send_incorrect_data_msg_to_client(const client_info* client);
 void close_client_connection(const client_info* client);
 void* client_info_copy_constructor(void* p);
 
+ssize_t read_line_from_client(client_info* client, char* buffer, size_t size) {
+    size_t idx = 0;
+
+    while (idx < size - 1) {
+        if (read(client->sock, buffer + idx, 1) <= 0) return -1;
+        if (buffer[idx] == '\n') break;
+        ++idx;
+    }
+    buffer[idx] = '\0';
+    return (ssize_t)idx;
+}
+
 int main(int argc, char** argv) {
     file_to_server = dictionary_create(string_hash_function, string_compare, string_copy_constructor,
                                        free, server_info_copy_constructor,
                                        free); // Maps file name -> server_info*
     mini_servers = vector_create(server_info_copy_constructor, free, server_info_default_constructor);
 
-    server_info test_server = {"172.22.146.40", "8080"};
-    vector_push_back(mini_servers, &test_server);
     if (argc < 2) {
         print_server_usage();
         exit(1);
@@ -253,6 +265,9 @@ int main(int argc, char** argv) {
                         break;
                     case V_UNKNOWN:
                         break;
+                    case ADD_SERVER:
+                        add_server(info);
+                        break;
                     }
                     break;
                 }
@@ -388,6 +403,12 @@ verb parse_verb(client_info* client) {
             client->state = INVALID_VERB;
             return V_UNKNOWN;
         }
+    } else if (pos < 11) { /* Can't tell if we have 'ADD_SERVER\n' yet */
+        ssize_t res = read_n_from_client(client, client->header, 11 - pos);
+        if (res == -1 || res == -2) {
+            client->state = INVALID_VERB;
+            return V_UNKNOWN;
+        }
     } else {
         client->state = INVALID_VERB;
         return V_UNKNOWN;
@@ -415,6 +436,12 @@ verb parse_verb(client_info* client) {
         client->buffer_position = 0;
         client->state = READING_HEADER;
         return DELETE;
+    }
+    if (pos == 11 && strncmp(client->header, "ADD_SERVER ", 11) == 0) {
+        memset(client->header, 0, client->buffer_position);
+        client->buffer_position = 0;
+        client->state = READING_HEADER;
+        return ADD_SERVER;
     }
 
     return V_UNKNOWN;
@@ -516,11 +543,11 @@ void get(client_info* client) {
 
 void put(client_info* client) {
     //if turn index is not 0, then redirect to the next server at that index
-    //send the ip and port of the server to the client 
-    //change the client state to stateDone 
+    //send the ip and port of the server to the client
+    //change the client state to stateDone
     //increment the index, make sure it wraps around
     //exit the funciton
-    //if the index is 0, then we do this 
+    //if the index is 0, then we do this
     size_t n = vector_size(mini_servers);
     if (client->local_file == 0) {
         if (current_server_index != 0 && n > 0) {
@@ -646,6 +673,38 @@ void list(client_info* client) {
         return;
     }
     free(file_list);
+    client->state = DONE;
+}
+
+void add_server(client_info* client) {
+    // client->header is <ip> <port>
+    char* p = strchr(client->header, ' ');
+    *p = '\0';
+    server_info s;
+    strcpy(s.ip, client->header);
+    strcpy(s.port, p + 1);
+
+
+    size_t bytes_read = 0;
+    size_t size;
+
+    read(client->sock, &size, sizeof(size));
+    // while (bytes_read < sizeof(size_t)) {
+    //     const ssize_t cur_read = read(client->sock, &size + bytes_read, sizeof(size_t) - bytes_read);
+    //     if (cur_read == -1 || cur_read == 0) {
+    //         break;
+    //     }
+    //     bytes_read += cur_read;
+    // }
+
+    char buffer[1024] = {0};
+    bytes_read = 0;
+    while (bytes_read < size) {
+        bytes_read += read_line_from_client(client, buffer, 1024);
+        dictionary_set(file_to_server, buffer, &s);
+    }
+    vector_push_back(mini_servers, &s);
+    send_ok_msg_to_client(client); // Notify the client that the operation was successful
     client->state = DONE;
 }
 

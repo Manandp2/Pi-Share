@@ -17,4 +17,4 @@ extern const size_t max_verb_size;
         fprintf(stderr, "\n");        \
     } while (0);
 
-typedef enum { GET, PUT, DELETE, LIST, V_UNKNOWN } verb;
+typedef enum { GET, PUT, DELETE, LIST, ADD_SERVER, V_UNKNOWN } verb;
